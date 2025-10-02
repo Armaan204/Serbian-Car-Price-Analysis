@@ -1,0 +1,1777 @@
+---
+author: "default"
+date: "2025-04-01"
+output:
+  pdf_document:
+    keep_tex: true
+  html_document:
+    df_print: paged
+header-includes:
+- \usepackage{cancel}
+- \usepackage{accents}
+- \renewcommand{\vec}[1]{\underaccent{\tilde}{#1}}
+---
+\begin{titlepage}
+    \vspace*{\fill} % Push content to center
+    \begin{center}
+        {\Huge \textbf{Regression Analysis on Car Prices in Serbia 2024} \par} % Title
+        \vspace{1.5cm}
+        {\Large STAC67 - Group 25} \\[1cm] % Subtitle
+        {\large Armaan Rehman Shah$^1$ - 1009641309,\\ Darren Guerina$^2$ - 1005511741,\\ Rachel Takacs$^3$ - 1001406294} \\[0.5cm] % Author
+        {\large April 4, 2025} \\[2cm] % Date
+    \end{center}
+    \vspace*{\fill} % Ensures centering
+
+    % --- Footer Section ---
+    \vspace*{\fill} % Pushes footer content to the very bottom
+    \noindent\rule{\linewidth}{0.4pt} % Thin horizontal line above footer
+
+    \begin{flushleft} % Left-align the footer
+        \footnotesize % Standard professional footer size
+        $^1$ Quantitative Variable Filtering, Introduction (Background and significance), Model (Final model breakdown, Adding \\ $\hspace{2 mm}$interaction terms on variables, Transformation of model variables for improvement). \\
+        $^2$ Discussion/Conclusion, Model (Model Diagnostics, LINE Assumptions, Model Validation). \\
+        $^3$ Qualitative Variable Filtering, Exploratory Data Analysis (Analysis of overall data pre-filtering, Analysis of overall data \\ $\hspace{2 mm}$post-filtering, Correlation of each variable with each other).
+    \end{flushleft}
+\end{titlepage}
+
+\newpage
+# Background and Significance{-}
+
+This study aims to predict used car prices in Serbia (2024) by analyzing the relationship between pricing and key vehicle features, including quantitative factors (mileage, horsepower, listing duration) and qualitative attributes (car type, fuel, A/C). The research question investigates how these variables collectively influence pricing, with the hypothesis that nonlinear relationships and interactions (e.g., mileage-age, engine size-fuel type) significantly improve predictive accuracy. To prepare the data, outliers were removed (e.g., cars priced above €20,000, extreme mileage values), and variables were transformed (log/square root) and centered to meet regression assumptions. The analysis employs a three-stage modeling approach: (1) a Main Effects Model to establish baselines, (2) an Interaction Model to test combined variable effects, and (3) a Power Model with polynomial terms and interactions for optimal fit. Variables like emission class and color were excluded due to redundancy or excessive categories, while car type and A/C were retained for their interpretable impact. By validating models through train-test splits and diagnostic checks, this study provides actionable insights for sellers pricing vehicles and identifies critical valuation drivers in Serbia’s used car market.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#setwd("~/Library/Mobile Documents/com~apple~CloudDocs/STAC67/Final Project")
+library(readr)
+library(ggplot2)
+library(dplyr)
+library(corrplot) 
+
+serbia_car_sales_price_2024.NA <- read_csv("serbia_car_sales_price_2024.csv", show_col_types = FALSE)
+serbia_car_sales_price_2024.NA$year_to_date <- 2024 - serbia_car_sales_price_2024.NA$year
+serbia_car_sales_price_2024 <- na.omit(serbia_car_sales_price_2024.NA)
+#removing NA values for complete case analysis, since there were only 20 
+#observations with NA values. 
+price <- serbia_car_sales_price_2024$price
+
+# description of each variable
+descript.quant <- list(
+  views = "The total number of views the car listing has received",
+  favorite = "The number of users who have added the car to their favorite list",
+  num.days = "The number of days since the post was made",
+  `car_mileage, km` = "The car’s mileage in kilometers", 
+  `engine_capacity, cc` = "The engine capacity in cubic centimeters (cc)",
+  year_to_date = "The number of years since the car was manufactured",
+  hp = "The engine power measured in horsepower.",
+  car_name = "Manufacturer and model.",
+  seats_amount = "The number of seats in the car.",
+  `A/C` = "Indicates whether the car is equipped with air conditioning.",
+  emission_class = "The car’s emission standard classification.",
+  color = "The exterior color of the car.",
+  type_of_drive = "Indicates the type of drive, such as front-wheel drive or all-wheel drive.",
+  doors = "The number of doors on the car.",
+  fuel = "The type of fuel the car uses, such as gasoline or diesel.",
+  car_type = "The category or body style of the car (e.g., sedan, SUV, hatchback).",
+  gearbox = "The type of transmission, such as manual or automatic."
+)
+```
+
+How much should we price a car, based on a number of defining features?
+If we go too low, we get high demand and therefore a limited supply. If
+we go too high, we get limited demand and oversupply.
+
+```{r, echo=FALSE, warning=FALSE}
+library(stringr)
+
+post.info <- serbia_car_sales_price_2024$post_info
+serbia_car_sales_price_2024$num.days <- NULL
+
+for (i in 1:length(post.info)){
+  if (str_detect(post.info[i], "a week ago") == TRUE){
+    serbia_car_sales_price_2024$num.days[i] = 7
+  }
+  if (str_detect(post.info[i], "weeks") == TRUE){
+   serbia_car_sales_price_2024$num.days[i] = parse_number(post.info[i])*7
+  }
+  if (str_detect(post.info[i], "days") == TRUE){
+   serbia_car_sales_price_2024$num.days[i] = parse_number(post.info[i])
+  }
+  if (str_detect(post.info[i], "today") == TRUE ){
+   serbia_car_sales_price_2024$num.days[i] = 0 #should this be zero?
+  }
+  if (str_detect(post.info[i], "yesterday") == TRUE ){
+   serbia_car_sales_price_2024$num.days[i] = 1
+  }
+  #months could be filtered more but this is only 1 input of 1 month
+  if (str_detect(post.info[i], "month") == TRUE){
+   serbia_car_sales_price_2024$num.days[i] = 31
+  }
+}
+temp.hp <- serbia_car_sales_price_2024$horsepower
+serbia_car_sales_price_2024$hp <- NULL
+
+for (i in 1:length(temp.hp)){
+  numbers <- str_extract_all(temp.hp[i], "\\d+")
+  serbia_car_sales_price_2024$hp[i] = as.numeric(unlist(numbers))[1]
+}
+```
+
+# Exploratory Data Analysis
+
+## The Data
+
+$Y$: price - The price of the car in Euro.
+$X_1$: views = The total number of views the car listing has received
+$X_2$: favorite = The number of users who have added the car to their
+favorite list
+$X_3$:  num.days = The number of days since the post was made
+$X_4$: `car_mileage, km` = The car’s mileage in kilometers
+$X_5$: `engine_capacity, cc` = The engine capacity in cubic centimeters (cc)
+$X_6$: year_to_date = The number of years since the car was manufactured
+$X_7$: hp = The engine power measured in horsepower.
+$X_8$: car_name = Manufacturer and model.
+$X_9$: seats_amount = The number of seats in the car.
+$X_{10}$: `A/C` = Indicates whether the car is equipped with air conditioning.
+$X_{11}$: emission_class = The car’s emission standard classification.
+$X_{12}$: color = The exterior color of the car.
+$X_{13}$: type_of_drive = Indicates the type of drive,
+such as front-wheel drive or all-wheel drive.
+$X_{14}$: doors = The number of doors on the car.
+$X_{15}$: fuel = "The type of fuel the car uses, such as gasoline or diesel.
+$X_{16}$: car_type = The category or body style of the car (e.g., sedan, SUV, hatchback).
+$X_{17}$: gearbox = The type of transmission, such as manual or automatic.
+
+## Analysis of Data Pre-filtering
+
+The data we receive includes seven quantitative variables and 10 qualitative 
+variables, of which we transform two variables into quantitative. 
+These were post info and horsepower, since these values contained numerical
+inputs. The relevance of the numerical values of post-info could relay information on recent popularity of a car whereas horsepower could relay information on the technical caliber of a car; higher quality cars have greater horsepower. Another variable transformed was the year the car was manufactured, transforming it to the number of years it has existed instead, for ease of interpretance.
+
+```{r, echo=FALSE, warning=FALSE, }
+#Testing Variables Function
+tests.function <- function(temp.x, price, quan_vars, var.quant){
+  
+  temp.fit <- lm(price ~ temp.x, na.action = na.omit)
+ 
+  y.hat <- temp.fit$fitted.values 
+ 
+  #BF Test
+  m <- median(y.hat)
+  new.data = data.frame(y.hat, temp.fit$residuals)
+  names(new.data) = c("y.hat", "Resid")
+  Resid.G1 = new.data[(new.data$y.hat<=m), ]
+  Resid.G2 = new.data[(new.data$y.hat> m), ]
+  median.G1 = median(Resid.G1$Resid)
+  median.G2 = median(Resid.G2$Resid)
+  D1 = abs(Resid.G1$Resid - median.G1)
+  D2 = abs(Resid.G2$Resid - median.G2)
+  n1 = length(D1)
+  n2 = length(D2)
+  S1 = var(D1)
+  S2 = var(D2)
+  Sp = ((n1-1)*S1 + (n2-1)*S2 )/(n1+n2-2)
+  t = (mean(D1) - mean(D2))/sqrt(Sp*(1/n1+1/n2))
+  BF <- c(t, 2*pt(t, (n1+n2-2)))
+  names(BF) <- c("t", "p-value")
+  
+  # Set up proper 2x2 plot layout
+  old_par1 <- par(mfrow=c(2,2))  # Fixed parameter name from nfrow to mfrow
+  
+  plot(temp.x, price, xlab = var.quant)
+  corr <- round(cor(temp.x,price), 4)
+  mtext(sprintf("Correlation Coefficient %f",corr) , side=3)
+  
+  # Residual plot with proper parameter name (cer -> cex)
+  plot(y.hat, temp.fit$residuals, pch=20, cex=0.5, xlab="Fitted Values",
+       ylab = "Residuals", main="Residuals vs Fitted")
+  abline(h=0, lty=2)  # Changed to h=0 for horizontal line
+
+  # QQ plot
+  qqnorm(temp.fit$residuals, main="Normal Q-Q Plot", xlab = var.quant)
+  qqline(temp.fit$residuals)
+  
+  # Histogram
+  hist(temp.fit$residuals, main="Histogram of Residuals", xlab = var.quant)
+  
+  # Reset graphical parameters
+  par(old_par1)
+}
+``` 
+
+```{r, echo=FALSE, warning=FALSE}
+library(patchwork)  # Load patchwork for easy grid layout
+
+# Function to plot in batches of 2x2
+plot_in_batches <- function(plot_list, plots_per_page = 4) {
+  num_plots <- length(plot_list)   # Total number of plots
+  num_pages <- ceiling(num_plots / plots_per_page)  # Total pages required
+  
+  for (i in 1:num_pages) {
+    start_idx <- (i - 1) * plots_per_page + 1
+    end_idx <- min(i * plots_per_page, num_plots)  # Ensure we don't exceed list length
+    
+    batch <- plot_list[start_idx:end_idx]  # Get subset of plots
+    
+    final_plot <- wrap_plots(batch) + plot_layout(ncol = 2, nrow = 2, guides = "collect")
+    
+    print(final_plot)  # Print each batch separately
+  }
+}
+violin_plot <- function(filter.v1, qual_v1, price) {
+  plot_list <- list()
+  
+  for (var1 in qual_v1) {
+
+    k <- ggplot(filter.v1, aes(x = .data[[var1]], y = price)) +
+      geom_violin(trim = FALSE, fill = "lightblue") +
+      geom_boxplot(width = 0.1, fill = "orange") +
+      labs(title = paste("Price Distribution by", var1),
+           x = var1,
+           y = "Price (Euro)") +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    
+    plot_list[[length(plot_list) + 1]] <- k  # Store plot
+  }
+
+  # Pass the list of plots to the function that handles batches
+  plot_in_batches(plot_list)
+}
+
+
+plot_function <- function(data, var_list, price_column) {
+  for (var in var_list) {
+    plot(data[[var]], price_column,
+         main = paste("Plot of", var, "vs Price"),
+         xlab = var, ylab = "Price")
+  }
+}
+```
+
+```{r, echo=FALSE, warning=FALSE, results='asis'}
+# list of variables
+quan_vars <- c("views", "favorite", "num.days",
+               "car_mileage, km", "engine_capacity, cc", 
+               "year_to_date", "hp")
+qual_vars <- c("car_name", "seats_amount", "A/C", 
+               "emission_class", "color", "type_of_drive", 
+               "doors", "fuel", "car_type", "gearbox")
+
+for (var.quant in quan_vars) {
+  
+  temp.x <- serbia_car_sales_price_2024[[var.quant]]
+  #tests.function(temp.x, price, quan_vars, var.quant)
+}
+for (vt in qual_vars) {
+  summary(serbia_car_sales_price_2024[[vt]])
+}
+# making sure each qualitative variable is a factor
+serbia_car_sales_price_2024[qual_vars] <- 
+  lapply(serbia_car_sales_price_2024[qual_vars], as.factor)
+# creating dummy variables
+dummy_data <- model.matrix(~ . - 1, data = 
+                             serbia_car_sales_price_2024[ , qual_vars])
+
+violin_plot(serbia_car_sales_price_2024, quan_vars, price)
+violin_plot(serbia_car_sales_price_2024, qual_vars, price)
+```
+
+## Quantitative Variables
+
+From our initial results, we can see transformation of some variables and
+filtering will be necessary.  
+
+For views, in testing for homogeneity of variance using the Brown-Forsythe (BF) test,
+we get the p-value: $1.3865218$ and thus violates equal variance. We have an $R^2 = 0.0003$
+indicating a non-existent linear relationship. The residual plot indicates this violation of linearity. The concentration of the plot indicates we should transform the variable. After trial and error, $\sqrt{x}$ produces
+better variability. 
+
+For favorite, the BF test gives the p-value: $0.002715321$ and thus violates equal variance. We have an $R^2 = -0.0764$ indicating a non-existent linear relationship. The residual plot indicates this violation of linearity. The concentration of the plot indicates we should transform the variable.
+After trial and error, $\sqrt{x}$ produces better variability.  
+
+For num.days, the BF test gives the p-value: $0.0006138374$ and thus violates equal variance. We have an $R^2 = -0.0257$ indicating a non-existent linear relationship.The residual plot indicates this violation of linearity. The concentration of the plot indicates we should transform the variable.
+After trial and error, $\sqrt{x}$ produces better variability. 
+
+For car_mileage, km, the BF test gives the p-value: $2.171742e-33$ and thus violates equal variance. We have an $R^2 = -0.0159$ indicating a non-existent
+linear relationship. The residual plot indicates this violation of linearity.
+The concentration of the plot indicates we should 
+transform the variable. After trial and error, $\log{x}$ produces
+better variability. 
+
+For engine_capacity, cc, the BF test gives the p-value: $2.332314e-24$ and thus violates equal variance. We have an $R^2 = 0.2453$ indicating a weak, positively correlated linear relationship. The residual plot indicates more random  scatter, but is still quite condensed in relation to this weak linearity. The concentration of the plot indicates we should transform the variable. After trial and error, $\log{x}$ produces better variability. 
+
+For year_to_date, the BF test gives the p-value: $2.745272e-63$ and thus violates equal variance. We have an $R^2 = -0.5694$ indicating a strong, 
+negatively correlated linear relationship. The residual plot has strong scatter, but not completely random looking. The concentration of the plot indicates we should transform the variable. After trial and error, $\log{x}$ 
+produces better variability. 
+
+For hp, the BF test gives the p-value: $1.034599e-97$ and thus violates equal variance. We have an $R^2 = 0.5129$ indicating a strong, positively 
+correlated linear relationship. The residual plot has weak randomization. 
+Transformation does not improve the relationship, as it is clear that
+outliers skew the linear relationship. 
+
+For the stronger correlated relationships, the variables have histograms that
+closely resemble normal plots and Q-Q plots that lie closer to $Y=X$ line, 
+but still stray, indicating normality does not hold well for even the strongly correlated variables.
+
+What we take away from the violin plots overall as well as all other plots,
+is that there are a significant amount of outliers under each variable,
+so by filtering, we can likely increase the strength each variable plays
+in model prediction. 
+
+## Qualitative Variables
+
+The quantitative variable car_name has too many levels. While a car brand name
+could mean more to specific buyers attracted to status, using this variable
+in our model would hinder the stronger predictive outcomes. 
+
+The variable seats_amount is overpowered by the number cars that have 5 seats. It is in our best interest for filter for cars with 5 seats. 
+
+The variable A/C can tell us a lot about the
+quality of a car in terms of comfort. A/C is considered a luxury which could correlate with a higher price.
+
+The variable emission_class is based on the year it existed
+for certification under a specific class. Therefore we choose to ignore this 
+variable since we already have number of years to indicate this already. 
+
+The variable color contains a wide variety but a majority of cars belong to the following colors: black and gray. Thus we choose to filter for gray and black cars. 
+
+The variable type_of_drive has few levels but is heavily carried by cars under front-wheel drive. Therefore we choose to filter for this type. 
+
+The variable doors has few levels but is heavily carried by cars with
+4/5 doors. Therefore we choose to filter for this type. 
+
+The variable fuel has few levels but majority falls under diesel and petrol. 
+We choose to filter for this type. 
+
+The variable gearbox has few levels but majority falls under manual. 
+We choose to filter for this type, including all variations of manual transmission. 
+The variable car type has 8 levels, but we choose to leave this in the
+regression as it is a variable that will make for some more insightful
+analysis, as the distinction between car types is significant. 
+
+```{r, echo=FALSE}
+# result <- boxcox(lm(price ~ views + favorite + num.days 
+#                  + `car_mileage, km` + `engine_capacity, cc`
+#                  + year_to_date + hp
+#                  + factor(seats_amount)
+#                  + factor(`A/C`)
+#                  + factor(color)
+#                  + factor(type_of_drive)
+#                  + factor(doors)
+#                  + factor(fuel)
+#                  + factor(car_type)
+#                  + factor(gearbox), data=serbia_car_sales_price_2024))
+# result$x[which.max(result$y)]
+```
+
+Lastly we perform Box-Cox tests. Our result on the full model as of this point without filtering but including only the necessary variables, is 0.2222222.
+It is at this point we also center the predictive and response variables. 
+
+```{r, echo=FALSE}
+center_this <- function(data) {
+  for (i in 1:ncol(data)) {
+    if (is.numeric(data[[i]])) {
+      data[[i]] <- data[[i]] - mean(data[[i]], na.rm = TRUE)
+    }
+  }
+  return(data)
+}
+```
+
+```{r, echo=FALSE}
+transformed <- serbia_car_sales_price_2024
+transformed$views <- sqrt(transformed$views)
+transformed$favorite <- sqrt(transformed$favorite)
+transformed$num.days <- sqrt(transformed$num.days)
+transformed$`car_mileage, km` <- log(transformed$`car_mileage, km`)
+transformed$`engine_capacity, cc` <- log(transformed$`engine_capacity, cc`)
+transformed$year_to_date <- log(transformed$year_to_date)
+#do nothing for hp
+lambda = 0.2222222
+transformed$price <- (transformed$price^lambda -1)/lambda
+
+transformed[sapply(transformed, is.infinite)] <- NA
+transformed<-transformed[complete.cases(transformed), ]
+cent.transf.data <- center_this(transformed)
+```
+
+```{r, echo=FALSE}
+# quan_vars <- c("views", "favorite", "num.days",
+#                "car_mileage, km", "engine_capacity, cc", 
+#                "year_to_date", "hp")
+# for (var.quant in quan_vars) {
+#   
+#   temp.x <- transformed[[var.quant]]
+#   tests.function(temp.x, transformed$price, quan_vars, var.quant)
+# }
+```
+
+We can see these results respect normality and BF tests indicate higher
+p-values for views, favorite and year_to_date.
+Overall the Q-Q plot and histograms of residuals indicate stronger normality
+and the residuals are more randomized for all variables, even 
+though we still have outliers. 
+
+\begin{center}
+\begin{tabular}{||c c c||} 
+ \hline
+ Variable & t-statistic & p-value \\ [0.5ex] 
+ \hline\hline
+ Views & 11.14438 & 2.00000 \\ 
+ \hline
+ Favorite & 2.119924 & 1.965953 \\
+ \hline
+ Num.Days & -2.31241969 & 0.02078316  \\
+ \hline
+ Car Mileage & -9.515485e+00 & 2.426601e-21 \\
+ \hline
+ Engine Capacity & -3.932050e+00 & 8.502948e-05 \\
+ \hline
+ Year to Date & 0.7570804 & 1.5509731 \\
+ \hline
+ Horsepower & -8.460689e+00 & 3.198377e-17 \\ [1ex] 
+ \hline
+\end{tabular}
+\end{center}
+
+\newpage
+
+We filter under the following criteria in order to isolate from outliers:
+```{r, echo=TRUE}
+filtering_function <- function(data) {
+  filter.v1 <- filter(serbia_car_sales_price_2024, doors == "4/5 doors", 
+                    seats_amount == 5, type_of_drive == "front",
+                    favorite > 0, `car_mileage, km` > 10000,
+                    hp < 201, `car_mileage, km` < 500000, 
+                    year_to_date < 30, favorite > 1,
+                    price < 20000, views < 500,
+                    favorite < 20)
+  filter.v1 <- filter.v1 %>% filter(str_detect(gearbox ,"manual"))
+  filter.v1 <- dplyr::filter(filter.v1, grepl('gray|black', color))
+  filter.v1 <- dplyr::filter(filter.v1, grepl('diesel|petrol', fuel))
+  filter.v1 <- dplyr::filter(filter.v1, !grepl('+ gas', fuel))
+  return(filter.v1)
+}
+```
+
+```{r, echo=FALSE}
+filtered.transformed <- filtering_function(cent.transf.data)
+filtered.transformed[sapply(filtered.transformed, is.infinite)] <- NA
+filtered.transformed<-filtered.transformed[complete.cases(filtered.transformed), ]
+```
+
+
+## Analysis of Data Post-Filtering
+
+As a result of our filtering, we only include the qualitative variables A/C
+and Car_Type as our qualitative variables. In referring to our appendix, 
+we notice a remarkable
+improvement in the correlation between the factors of each these variables when
+we use the data that is transformed, centered and filtered. Overall for the
+quantitative variables, we notice an increase in the correlation coefficients,
+better scatter in the residual
+plots, increasingly normalized histograms, Q-Q plots closer to $Y=X$ line, and
+an overall lack of outliers. 
+
+## Correlation Plot
+
+```{r, echo=FALSE, warning=FALSE}
+# quan_vars <- c("views", "favorite", "num.days",
+#                "car_mileage, km", "engine_capacity, cc", 
+#                "year_to_date", "hp")
+# qual_vars <- c("A/C")
+# serbia_car_sales_price_2024[qual_vars] <- 
+#   lapply(serbia_car_sales_price_2024[qual_vars], as.factor)
+# dummy_data.1 <- model.matrix(~ . - 1,
+#                                data = serbia_car_sales_price_2024[ , qual_vars])
+# var <- cbind(serbia_car_sales_price_2024[quan_vars], data.frame(dummy_data.1))
+# M <- cor(var, use = "complete.obs")
+# corrplot(M)
+```
+ 
+```{r, echo=FALSE, warning=FALSE}
+# quan_vars <- c("views", "favorite", "num.days",
+#                "car_mileage, km", "engine_capacity, cc", 
+#                "year_to_date", "hp")
+# qual_vars <- c("car_type")
+# serbia_car_sales_price_2024[qual_vars] <- 
+#   lapply(serbia_car_sales_price_2024[qual_vars], as.factor)
+# dummy_data.1 <- model.matrix(~ . - 1,
+#                                data = serbia_car_sales_price_2024[ , qual_vars])
+# var <- cbind(serbia_car_sales_price_2024[quan_vars], data.frame(dummy_data.1))
+# M <- cor(var, use = "complete.obs")
+# corrplot(M)
+```
+
+```{r, echo=FALSE, warning=FALSE}
+quan_vars <- c("views", "favorite", "num.days",
+               "car_mileage, km", "engine_capacity, cc",
+               "year_to_date", "hp")
+qual_vars <- c("A/C")
+filtered.transformed[qual_vars] <-
+  lapply(filtered.transformed[qual_vars], as.factor)
+dummy_data.1 <- model.matrix(~ . - 1,
+                               data = filtered.transformed[ , qual_vars])
+var <- cbind(filtered.transformed[quan_vars], data.frame(dummy_data.1))
+M <- cor(var, use = "complete.obs")
+corrplot(M)
+```
+
+```{r, echo=FALSE, warning=FALSE}
+# quan_vars <- c("views", "favorite", "num.days",
+#                "car_mileage, km", "engine_capacity, cc", 
+#                "year_to_date", "hp")
+# qual_vars <- c("car_type")
+# filtered.transformed[qual_vars] <- 
+#   lapply(filtered.transformed[qual_vars], as.factor)
+# dummy_data.1 <- model.matrix(~ . - 1,
+#                                data = filtered.transformed[ , qual_vars])
+# var <- cbind(filtered.transformed[quan_vars], data.frame(dummy_data.1))
+# M <- cor(var, use = "complete.obs")
+# corrplot(M)
+```
+
+
+```{r, echo=FALSE} 
+#Model Testing (full and reduced)
+ model_tests <- function(model, data){
+  #print(anova(model))
+  #print(summary(model))
+  resid = model$residuals
+  fit.Y = predict(model)
+
+  # Set up proper 2x2 plot layout
+  old_par <- par(mfrow=c(2,2))  # Fixed parameter name from nfrow to mfrow
+
+  # Residual plot with proper parameter name (cer -> cex)
+  plot(fit.Y, resid, pch=20, cex=0.5, xlab="Fitted Values",
+       ylab = "Residuals", main="Residuals vs Fitted")
+  abline(h=0, lty=2)  # Changed to h=0 for horizontal line
+
+  # QQ plot
+  qqnorm(resid, main="Normal Q-Q Plot")
+  qqline(resid)
+
+  # Histogram
+  hist(resid, main="Histogram of Residuals")
+
+  # Empty plot to maintain 2x2 layout
+  plot(1, type="n", axes=FALSE, xlab="", ylab="")
+  
+  # Reset graphical parameters
+  par(old_par)
+}
+```
+
+```{r, echo=FALSE}
+#Model 1 - Full Model - No transformation or centering or filtering.
+fit.1 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox), data=serbia_car_sales_price_2024)
+#model_tests(fit.1)
+```
+
+```{r, echo=FALSE}
+#Model 2 - Full Model - Transformed and centered but not filtered
+fit.2 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox), data=cent.transf.data)
+#model_tests(fit.2)
+```
+
+```{r,echo=FALSE}
+#Model 3 - Full Model - Transformed, centered and filtered
+fit.3 <- lm(price ~ views + favorite + num.days
+                  + `car_mileage, km` + `engine_capacity, cc`
+                  + year_to_date + hp
+                  + factor(`A/C`)
+                  + factor(car_type), data=filtered.transformed)
+# model_tests(fit.3)
+```
+
+```{r, echo=FALSE}
+#Model 4 - Reduced Model - No transformation or centering
+fit.4 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type), data=serbia_car_sales_price_2024)
+#model_tests(fit.4)
+```
+
+```{r, echo=FALSE}
+#Model 5 - Reduced Model - Transformed and centered but not filtered
+fit.5 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type), data=cent.transf.data)
+#model_tests(fit.5)
+```
+
+```{r, echo=FALSE}
+#Model 6 - Reduced Model - Transformed, centered and filtered
+fit.6 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type), data=filtered.transformed)
+#model_tests(fit.6)
+```
+
+
+```{r, echo=FALSE}
+#Model 7 - Full Model with Interactions V1 - No transformation or centering
+fit.7 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = serbia_car_sales_price_2024)
+#model_tests(fit.7)
+```
+
+```{r, echo=FALSE}
+#Model 8 - Full Model with Interactions V2 - No transformation or centering
+# P values indicate that Mileage-age interaction is significant, but not the others. Testing other interactions:
+fit.8 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = serbia_car_sales_price_2024)
+#model_tests(fit.8)
+```
+
+```{r, echo=FALSE}
+#Model 9 - Full Model with Interactions V1 - Transformed and centered but not filtered
+fit.9 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = cent.transf.data)
+#model_tests(fit.9)
+```
+
+```{r, echo=FALSE}
+#Model 10 - Full Model with Interactions V2 - Transformed and centered but not filtered
+# P values indicate that Mileage-age interaction is significant, but not the others. Testing other interactions:
+fit.10 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox) + 
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = cent.transf.data)
+#model_tests(fit.10)
+```
+
+```{r, echo=FALSE}
+#Model 11 - Full Model with Interactions V1 - Transformed, centered and filtered
+fit.11 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = filtered.transformed)
+#model_tests(fit.11)
+```
+
+```{r, echo=FALSE}
+#Model 12 - Full Model with Interactions V2 - Transformed, centered and filtered
+# P values indicate that Mileage-age interaction is significant, but not the others. Testing other interactions:
+fit.12 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) + 
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = filtered.transformed)
+#model_tests(fit.12)
+```
+
+```{r, echo=FALSE}
+#Model 13 - Reduced Model with Interactions V1 - No transformation or centering
+fit.13 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = serbia_car_sales_price_2024)
+#model_tests(fit.13)
+```
+
+```{r, echo=FALSE}
+#Model 14 - Reduced Model with Interactions V2 - No transformation or centering
+# P values indicate that Mileage-age interaction is significant, but not the others. Testing other interactions:
+fit.14 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) + factor(fuel) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = serbia_car_sales_price_2024)
+#model_tests(fit.14)
+```
+
+```{r, echo=FALSE}
+#Model 15 - Reduced Model with Interactions V1 - Transformed and centered but not filtered
+fit.15 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = cent.transf.data)
+#model_tests(fit.15)
+```
+
+```{r, echo=FALSE}
+#Model 16 - Reduced Model with Interactions V2 - Transformed and centered but not filtered
+# P values indicate that Mileage-age interaction is significant, but not the others. Testing other interactions:
+fit.16 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) + factor(fuel) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = cent.transf.data)
+#model_tests(fit.16)
+```
+
+```{r, echo=FALSE}
+#Model 17 - Reduced Model with Interactions V1 - Transformed, centered and filtered
+fit.17 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = filtered.transformed)
+#model_tests(fit.17)
+```
+
+```{r, echo=FALSE}
+#Model 18 - Reduced Model with Interactions V2 - Transformed, centered and filtered
+# P values indicate that Mileage-age interaction is significant, but not the others. Testing other interactions:
+fit.18 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) + factor(fuel) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = filtered.transformed)
+#model_tests(fit.18)
+```
+
+```{r, echo=FALSE}
+#Model 19 - Full Model with 2nd order + interactions V1 - No transformation or centering
+fit.19 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox) +
+                  I(views^2) + 
+                  I(favorite^2) + 
+                  I(num.days^2) + 
+                  I(`car_mileage, km`^2) + 
+                  I(`engine_capacity, cc`^2) + 
+                  I(year_to_date^2) + 
+                  I(hp^2) + 
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = serbia_car_sales_price_2024)
+#model_tests(fit.19)
+```
+
+```{r, echo=FALSE}
+#Model 20 - Full Model with 2nd order + interactions V2 - No transformation or centering
+fit.20 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox) +
+                  I(views^2) + 
+                  I(favorite^2) + 
+                  I(num.days^2) + 
+                  I(`car_mileage, km`^2) + 
+                  I(`engine_capacity, cc`^2) + 
+                  I(year_to_date^2) + 
+                  I(hp^2) + 
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = serbia_car_sales_price_2024)
+#model_tests(fit.20)
+```
+
+```{r, echo=FALSE}
+#Model 21 - Full Model with 2nd + 3rd order + interactions V1 - No transformation or centering
+fit.21 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox) +
+                  I(views^2) + I(views^3) +
+                  I(favorite^2) + I(favorite^3) +
+                  I(num.days^2) + I(num.days^3) +
+                  I(`car_mileage, km`^2) + I(`car_mileage, km`^3) +
+                  I(`engine_capacity, cc`^2) + I(`engine_capacity, cc`^3) +
+                  I(year_to_date^2) + I(year_to_date^3) +
+                  I(hp^2) + I(hp^3) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = serbia_car_sales_price_2024)
+#model_tests(fit.21)
+```
+
+```{r, echo=FALSE}
+#Model 22 - Full Model with 2nd + 3rd order + interactions V1 - No transformation or centering
+fit.22 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox) +
+                  I(views^2) + I(views^3) +
+                  I(favorite^2) + I(favorite^3) +
+                  I(num.days^2) + I(num.days^3) +
+                  I(`car_mileage, km`^2) + I(`car_mileage, km`^3) +
+                  I(`engine_capacity, cc`^2) + I(`engine_capacity, cc`^3) +
+                  I(year_to_date^2) + I(year_to_date^3) +
+                  I(hp^2) + I(hp^3) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = serbia_car_sales_price_2024)
+#model_tests(fit.22)
+```
+
+```{r, echo=FALSE}
+#Model 23 - Full Model with 2nd order + interactions V1 - Transformed and centered but not filtered
+fit.23 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox) +
+                  I(views^2) + 
+                  I(favorite^2) + 
+                  I(num.days^2) + 
+                  I(`car_mileage, km`^2) + 
+                  I(`engine_capacity, cc`^2) + 
+                  I(year_to_date^2) + 
+                  I(hp^2) + 
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = cent.transf.data)
+#model_tests(fit.23)
+```
+
+```{r, echo=FALSE}
+#Model 24 - Full Model with 2nd order + interactions V2 - Transformed and centered but not filtered
+fit.24 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox) +
+                  I(views^2) + 
+                  I(favorite^2) + 
+                  I(num.days^2) + 
+                  I(`car_mileage, km`^2) + 
+                  I(`engine_capacity, cc`^2) + 
+                  I(year_to_date^2) + 
+                  I(hp^2) + 
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = cent.transf.data)
+#model_tests(fit.24)
+```
+
+```{r, echo=FALSE}
+#Model 25 - Full Model with 2nd + 3rd order + interactions V1 - Transformed and centered but not filtered
+fit.25 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox) +
+                  I(views^2) + I(views^3) +
+                  I(favorite^2) + I(favorite^3) +
+                  I(num.days^2) + I(num.days^3) +
+                  I(`car_mileage, km`^2) + I(`car_mileage, km`^3) +
+                  I(`engine_capacity, cc`^2) + I(`engine_capacity, cc`^3) +
+                  I(year_to_date^2) + I(year_to_date^3) +
+                  I(hp^2) + I(hp^3) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = cent.transf.data)
+#model_tests(fit.25)
+```
+
+```{r, echo=FALSE}
+#Model 26 - Full Model with 2nd + 3rd order + interactions V1 - Transformed and centered but not filtered
+fit.26 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox) +
+                  I(views^2) + I(views^3) +
+                  I(favorite^2) + I(favorite^3) +
+                  I(num.days^2) + I(num.days^3) +
+                  I(`car_mileage, km`^2) + I(`car_mileage, km`^3) +
+                  I(`engine_capacity, cc`^2) + I(`engine_capacity, cc`^3) +
+                  I(year_to_date^2) + I(year_to_date^3) +
+                  I(hp^2) + I(hp^3) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = cent.transf.data)
+#model_tests(fit.26)
+```
+
+```{r, echo=FALSE}
+#Model 27 - Full Model with 2nd order + interactions V1 - Transformed, centered and filtered
+fit.27 <- lm(price ~ views + favorite + num.days 
+                  + `car_mileage, km` + `engine_capacity, cc`
+                  + year_to_date + hp
+                  + factor(`A/C`)
+                  + factor(car_type) +
+                   I(views^2) + 
+                   I(favorite^2) + 
+                   I(num.days^2) + 
+                   I(`car_mileage, km`^2) + 
+                   I(`engine_capacity, cc`^2) + 
+                   I(year_to_date^2) + 
+                   I(hp^2) + 
+                  `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  `engine_capacity, cc`:hp +        # Engine size-power interaction
+                   views:favorite,                   # Popularity interaction
+                      data = filtered.transformed)
+ #model_tests(fit.27)
+```
+
+```{r, echo=FALSE}
+#Model 28 - Full Model with 2nd order + interactions V2 - Transformed, centered and filtered
+fit.28 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) +
+                  I(views^2) + 
+                  I(favorite^2) + 
+                  I(num.days^2) + 
+                  I(`car_mileage, km`^2) + 
+                  I(`engine_capacity, cc`^2) + 
+                  I(year_to_date^2) + 
+                  I(hp^2) + 
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = filtered.transformed)
+#model_tests(fit.28)
+```
+
+```{r, echo=FALSE}
+#Model 29 - Full Model with 2nd + 3rd order + interactions V1 - Transformed, centered and filtered
+fit.29 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) +
+                  I(views^2) + I(views^3) +
+                  I(favorite^2) + I(favorite^3) +
+                  I(num.days^2) + I(num.days^3) +
+                  I(`car_mileage, km`^2) + I(`car_mileage, km`^3) +
+                  I(`engine_capacity, cc`^2) + I(`engine_capacity, cc`^3) +
+                  I(year_to_date^2) + I(year_to_date^3) +
+                  I(hp^2) + I(hp^3) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = filtered.transformed)
+#model_tests(fit.29)
+```
+
+```{r, echo=FALSE}
+#Model 30 - Full Model with 2nd + 3rd order + interactions V1 - Transformed, centered and filtered
+fit.30 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) +
+                  I(views^2) + I(views^3) +
+                  I(favorite^2) + I(favorite^3) +
+                  I(num.days^2) + I(num.days^3) +
+                  I(`car_mileage, km`^2) + I(`car_mileage, km`^3) +
+                  I(`engine_capacity, cc`^2) + I(`engine_capacity, cc`^3) +
+                  I(year_to_date^2) + I(year_to_date^3) +
+                  I(hp^2) + I(hp^3) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = filtered.transformed)
+#model_tests(fit.30)
+```
+
+
+```{r, echo=FALSE}
+#Model 31 - Reduced Model with 2nd order + interactions V1 - No transformation or centering
+fit.31 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) +
+                  I(views^2) + 
+                  I(favorite^2) + 
+                  I(num.days^2) + 
+                  I(`car_mileage, km`^2) + 
+                  I(`engine_capacity, cc`^2) + 
+                  I(year_to_date^2) + 
+                  I(hp^2) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = serbia_car_sales_price_2024)
+#model_tests(fit.31)
+```
+
+```{r, echo=FALSE}
+#Model 32 - Reduced Model with 2nd order + interactions V2 - No transformation or centering
+fit.32 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) + factor(fuel) +
+                  I(views^2) + 
+                  I(favorite^2) + 
+                  I(num.days^2) + 
+                  I(`car_mileage, km`^2) + 
+                  I(`engine_capacity, cc`^2) + 
+                  I(year_to_date^2) + 
+                  I(hp^2) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = serbia_car_sales_price_2024)
+#model_tests(fit.32)
+```
+
+```{r, echo=FALSE}
+#Model 33 - Reduced Model with 2nd + 3rd order + interactions V1 - No transformation or centering
+fit.33 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) +
+                  I(views^2) + I(views^3) +
+                  I(favorite^2) + I(favorite^3) +
+                  I(num.days^2) + I(num.days^3) +
+                  I(`car_mileage, km`^2) + I(`car_mileage, km`^3) +
+                  I(`engine_capacity, cc`^2) + I(`engine_capacity, cc`^3) +
+                  I(year_to_date^2) + I(year_to_date^3) +
+                  I(hp^2) + I(hp^3) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = serbia_car_sales_price_2024)
+#model_tests(fit.33)
+```
+
+```{r, echo=FALSE}
+#Model 34 - Reduced Model with 2nd + 3rd order + interactions V2 - No transformation or centering
+fit.34 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) + factor(fuel) +
+                  I(views^2) + I(views^3) +
+                  I(favorite^2) + I(favorite^3) +
+                  I(num.days^2) + I(num.days^3) +
+                  I(`car_mileage, km`^2) + I(`car_mileage, km`^3) +
+                  I(`engine_capacity, cc`^2) + I(`engine_capacity, cc`^3) +
+                  I(year_to_date^2) + I(year_to_date^3) +
+                  I(hp^2) + I(hp^3) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = serbia_car_sales_price_2024)
+#model_tests(fit.34)
+```
+
+```{r, echo=FALSE}
+#Model 35 - Reduced Model with 2nd order + interactions V1 - Transformed and centered but not filtered
+fit.35 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) +
+                  I(views^2) + 
+                  I(favorite^2) + 
+                  I(num.days^2) + 
+                  I(`car_mileage, km`^2) + 
+                  I(`engine_capacity, cc`^2) + 
+                  I(year_to_date^2) + 
+                  I(hp^2) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = cent.transf.data)
+#model_tests(fit.35)
+```
+
+```{r, echo=FALSE}
+#Model 36 - Reduced Model with 2nd order + interactions V2 - Transformed and centered but not filtered
+fit.36 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) + factor(fuel) +
+                  I(views^2) + 
+                  I(favorite^2) + 
+                  I(num.days^2) + 
+                  I(`car_mileage, km`^2) + 
+                  I(`engine_capacity, cc`^2) + 
+                  I(year_to_date^2) + 
+                  I(hp^2) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = cent.transf.data)
+#model_tests(fit.36)
+```
+
+```{r, echo=FALSE}
+#Model 37 - Reduced Model with 2nd + 3rd order + interactions V1 - Transformed and centered but not filtered
+fit.37 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) +
+                  I(views^2) + I(views^3) +
+                  I(favorite^2) + I(favorite^3) +
+                  I(num.days^2) + I(num.days^3) +
+                  I(`car_mileage, km`^2) + I(`car_mileage, km`^3) +
+                  I(`engine_capacity, cc`^2) + I(`engine_capacity, cc`^3) +
+                  I(year_to_date^2) + I(year_to_date^3) +
+                  I(hp^2) + I(hp^3) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = cent.transf.data)
+#model_tests(fit.37)
+```
+
+```{r, echo=FALSE}
+#Model 38 - Reduced Model with 2nd + 3rd order + interactions V1 - Transformed and centered but not filtered
+fit.38 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) + factor(fuel) +
+                  I(views^2) + I(views^3) +
+                  I(favorite^2) + I(favorite^3) +
+                  I(num.days^2) + I(num.days^3) +
+                  I(`car_mileage, km`^2) + I(`car_mileage, km`^3) +
+                  I(`engine_capacity, cc`^2) + I(`engine_capacity, cc`^3) +
+                  I(year_to_date^2) + I(year_to_date^3) +
+                  I(hp^2) + I(hp^3) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = cent.transf.data)
+#model_tests(fit.38)
+```
+
+```{r, echo=FALSE}
+#Model 39 - Reduced Model with 2nd order+ interactions V1 - Transformed, centered and filtered
+fit.39 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) +
+                  I(views^2) + 
+                  I(favorite^2) + 
+                  I(num.days^2) + 
+                  I(`car_mileage, km`^2) + 
+                  I(`engine_capacity, cc`^2) + 
+                  I(year_to_date^2) + 
+                  I(hp^2) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = filtered.transformed)
+#model_tests(fit.39)
+```
+
+```{r, echo=FALSE}
+#Model 40 - Reduced Model with 2nd order + interactions V2 - Transformed, centered and filtered
+fit.40 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) + factor(fuel) +
+                  I(views^2) + 
+                  I(favorite^2) + 
+                  I(num.days^2) + 
+                  I(`car_mileage, km`^2) + 
+                  I(`engine_capacity, cc`^2) + 
+                  I(year_to_date^2) + 
+                  I(hp^2) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = filtered.transformed)
+#model_tests(fit.40)
+```
+
+```{r, echo=FALSE}
+#Model 41 - Reduced Model with 2nd + 3rd order + interactions V1 - Transformed, centered and filtered
+fit.41 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) +
+                  I(views^2) + I(views^3) +
+                  I(favorite^2) + I(favorite^3) +
+                  I(num.days^2) + I(num.days^3) +
+                  I(`car_mileage, km`^2) + I(`car_mileage, km`^3) +
+                  I(`engine_capacity, cc`^2) + I(`engine_capacity, cc`^3) +
+                  I(year_to_date^2) + I(year_to_date^3) +
+                  I(hp^2) + I(hp^3) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                 `engine_capacity, cc`:hp +        # Engine size-power interaction
+                  views:favorite,                   # Popularity interaction
+                     data = filtered.transformed)
+#model_tests(fit.41)
+```
+
+```{r, echo=FALSE}
+#Model 42 - Reduced Model with 2nd + 3rd order + interactions V1 - Transformed, centered and filtered
+fit.42 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) + factor(fuel) +
+                  I(views^2) + I(views^3) +
+                  I(favorite^2) + I(favorite^3) +
+                  I(num.days^2) + I(num.days^3) +
+                  I(`car_mileage, km`^2) + I(`car_mileage, km`^3) +
+                  I(`engine_capacity, cc`^2) + I(`engine_capacity, cc`^3) +
+                  I(year_to_date^2) + I(year_to_date^3) +
+                  I(hp^2) + I(hp^3) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = filtered.transformed)
+#model_tests(fit.42)
+```
+
+# Model{-}
+
+```{r, echo=FALSE}
+library(xtable)
+model_tests <- function(model, data){
+  print(anova(model))
+  #print(confint(model))
+  #print(predict(model, data, interval="confidence"))
+  #print(predict(model, data, interval="prediction"))
+  print(summary(model))
+  #kable(xtable(model)) cannot find function kable
+  resid = model$residuals
+  fit.Y = predict(model)
+  
+  # Set up proper 2x2 plot layout
+  old_par <- par(mfrow=c(2,2))  # Fixed parameter name from nfrow to mfrow
+  
+  # Residual plot with proper parameter name (cer -> cex)
+  plot(fit.Y, resid, pch=20, cex=0.5, xlab="Fitted Values",
+       ylab = "Residuals", main="Residuals vs Fitted")
+  abline(h=0, lty=2)  # Changed to h=0 for horizontal line
+  
+  # QQ plot
+  qqnorm(resid, main="Normal Q-Q Plot")
+  qqline(resid)
+  
+  # Histogram
+  hist(resid, main="Histogram of Residuals")
+  
+  # Empty plot to maintain 2x2 layout
+  plot(1, type="n", axes=FALSE, xlab="", ylab="")
+  
+  # Reset graphical parameters
+  par(old_par)
+  
+  #shapiro.test(resid) model is too big for test 
+  #ols_vif_tol(model) - testing for multilinearcollinearity
+  #ols_plot_obs_fit(model) what library??
+}
+```
+
+## Main Effect Model
+
+```{r, echo=FALSE}
+library(knitr)
+fit.1 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(seats_amount)
+                 + factor(`A/C`)
+                 + factor(color)
+                 + factor(type_of_drive)
+                 + factor(doors)
+                 + factor(fuel)
+                 + factor(car_type)
+                 + factor(gearbox), data=serbia_car_sales_price_2024)
+# Get model summary
+fit_summary <- summary(fit.1)
+
+# Calculate metrics
+metrics <- data.frame(
+  Metric = c("Number of Predictors", 
+             "R-squared", 
+             "Adjusted R-squared",
+             "F-statistic",
+             "MSE"),
+  Value = c(
+    length(coef(fit.1)) - 1,  # Exclude intercept
+    fit_summary$r.squared,
+    fit_summary$adj.r.squared,
+    fit_summary$fstatistic[1],
+    mean(residuals(fit.1)^2)  # Mean Squared Error - THIS PAREN WAS MISSING
+  )
+)
+
+# Format values nicely
+metrics$Value <- format(metrics$Value, scientific = FALSE, digits = 4)
+
+# Create the table
+kable(metrics,
+      caption = "Model 1 Performance Metrics",
+      col.names = c("Metric", "Value"),
+      align = c("l", "r"),
+      format = "simple")
+```
+
+The interaction model considers relationship between Mileage-Age as mileage might depend on car age, Age-AC as newer cars are more likely to be equipped with AC, and Engine Size-Fuel Type as Engine size might depend on fuel type.
+
+## Interaction Model:
+```{r, echo=FALSE}
+fit.18 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) + factor(fuel) +
+                 `car_mileage, km`:year_to_date +  # Mileage-age interaction
+                  year_to_date:factor(`A/C`) +    # Premium-age interaction
+                 `engine_capacity, cc`:factor(fuel), # Fuel-efficiency interaction
+                     data = filtered.transformed)
+```
+
+Using Backward Elimination & AIC, we obtain our final model:
+
+## Final Power Model:
+```{r, echo=FALSE}
+library(knitr)
+fit.42 <- lm(price ~ views + favorite + num.days 
+                 + `car_mileage, km` + `engine_capacity, cc`
+                 + year_to_date + hp
+                 + factor(`A/C`)
+                 + factor(car_type) + factor(fuel) +
+                  I(views^2) + I(views^3) +
+                  I(favorite^2) + I(favorite^3) +
+                  I(num.days^2) + I(num.days^3) +
+                  I(`car_mileage, km`^2) + I(`car_mileage, km`^3) +
+                  I(`engine_capacity, cc`^2) + I(`engine_capacity, cc`^3) +
+                  I(year_to_date^2) + I(year_to_date^3) +
+                  I(hp^2) + I(hp^3) +
+                 `car_mileage, km`:year_to_date +
+                  year_to_date:factor(`A/C`) +
+                 `engine_capacity, cc`:factor(fuel),
+                     data = filtered.transformed)
+# Get model summary
+fit_summary <- summary(fit.42)
+# Extract coefficients and p-values
+coef_table <- as.data.frame(fit_summary$coefficients[, c(1, 4)])
+names(coef_table) <- c("Coefficient", "p-value")
+format_pval <- function(x) {
+  ifelse(x < 0.001, 
+         format(x, scientific = TRUE, digits = 3),
+         format(x, scientific = FALSE, digits = 5))
+}
+# Format numbers to show in scientific notation
+coef_table$Coefficient <- round(coef_table$Coefficient, 4)
+coef_table$`p-value` <- sapply(coef_table$`p-value`, format_pval)
+# Create the table with variable names as a column
+coef_table$Variable <- rownames(coef_table)
+rownames(coef_table) <- NULL
+coef_table <- coef_table[, c(3, 1, 2)]  # Reorder columns
+# Print the table
+kable(coef_table, 
+      align = c("l", "r", "r"),
+      format = "simple")  # Use "simple" format for clean output
+```
+
+Interpretation of regression coefficients:
+
+\begin{itemize}
+  \item $\hat{\beta_0}$ (Intercept): The expected mean car price is €16,197.91 when all numeric predictors are zero, for an automatic A/C sedan with baseline fuel type.
+  \item $\hat{\beta_1}$ (views): For each additional view, the expected mean car price decreases by €19.95 while holding all other variables constant.
+  \item $\hat{\beta_2}$ (favorite): For each additional favorite, the expected mean car price decreases by €1.05 while holding all other variables constant.
+  \item $\hat{\beta_3}$ (num.days): For each additional day a listing is active, the expected mean car price increases by €131.96 while holding all other variables constant.
+  \item $\hat{\beta_4}$ (car\_mileage, km): For each additional kilometer, the expected mean car price increases by €0.009 while holding all other variables constant.
+  \item $\hat{\beta_5}$ (engine\_capacity, cc): For each additional cc of engine size, the expected mean car price decreases by €8.55 while holding all other variables constant.
+  \item $\hat{\beta_6}$ (factor(A/C)manual A/C): The expected mean price difference between manual A/C and automatic A/C (baseline) cars is -€2,501.23 while holding all other variables constant.
+  \item $\hat{\beta_7}$ (factor(A/C)no A/C): The expected mean price difference between no A/C and automatic A/C cars is -€548.33 while holding all other variables constant.
+  \item $\hat{\beta_8}$ (factor(car\_type)coupe): The expected mean price difference between coupes and sedans (baseline) is €530.94 while holding all other variables constant.
+  \item $\hat{\beta_9}$ (factor(car\_type)hatchback): The expected mean price difference between hatchbacks and sedans is €592.54 while holding all other variables constant.
+  \item $\hat{\beta_{10}}$ (I(views\textsuperscript{2})): The expected change in slope for the views-price relationship is +€0.08 per squared view while holding all other variables constant.
+  \item $\hat{\beta_{11}}$ (I(views\textsuperscript{3})): The expected change in slope for the views-price relationship is -€0.0001 per cubed view while holding all other variables constant.
+  \item $\hat{\beta_{12}}$ (car\_mileage, km:year\_to\_date): The expected slope difference in the mileage-price relationship for each additional year of car age is +€0.0001 while holding all other variables constant.
+  \item $\hat{\beta_{13}}$ (year\_to\_date:factor(A/C)manual A/C): The expected slope difference in the age-price relationship for manual A/C versus automatic A/C cars is +€123.81 per year while holding all other variables constant.
+  \item $\hat{\beta_{14}}$ (engine\_capacity, cc:factor(fuel)petrol): The expected slope difference in the engine size-price relationship for petrol versus baseline fuel type cars is -€1.91 per cc while holding all other variables constant.
+\end{itemize}
+
+
+```{r, echo=FALSE, warning=FALSE}
+get_model_metrics <- function(model, model_name) {
+  n <- nrow(model$model)  
+  p <- length(coefficients(model))  
+  
+  #R2, R2adj, AIC
+  r2 <- summary(model)$r.squared
+  adj_r2 <- summary(model)$adj.r.squared
+  aic_val <- AIC(model)
+  
+  # PRESS 
+  residuals <- resid(model)
+  hat_matrix <- lm.influence(model)$hat
+  press <- sum((residuals / (1 - hat_matrix))^2)
+  
+  return(data.frame(Model = model_name, R2 = r2, R2_adj = adj_r2, AIC = aic_val, PRESS = press))
+}
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+library(dplyr)
+library(knitr)
+
+# Define models with custom names
+selected_models <- list(
+  c(1, "Main Effect Model"),
+  c(18, "Interaction Model"),
+  c(42, "Power Model")
+)
+
+# Generate metrics for selected models with custom names
+model_list <- lapply(selected_models, function(x) {
+  get_model_metrics(get(paste0("fit.", x[1])), x[2])
+})
+
+# Combine and format results
+model_results <- bind_rows(model_list) %>%
+  mutate(across(where(is.numeric), round, digits = 3)) %>%
+  rename(
+    `Model Name` = Model,
+    `R²` = R2,
+    `Adjusted R²` = R2_adj,
+    `AIC Score` = AIC,
+    `PRESS Statistic` = PRESS
+  )
+
+# Print table
+kable(model_results, 
+      format = "markdown")
+```
+
+## Model Diagnostics
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(ggrepel)
+
+# Number of observations
+n <- nrow(filtered.transformed)
+
+# Cook's distance values
+cooks_d <- cooks.distance(fit.42)
+
+# Threshold for influential points
+threshold <- 4 / n
+
+# Create a data frame for plotting
+cooks_df <- data.frame(
+  obs = 1:n,
+  cooks_d = cooks_d,
+  label = ifelse(cooks_d > threshold, as.character(1:n), NA)
+)
+
+# Plot
+a <- ggplot(cooks_df, aes(x = obs, y = cooks_d)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  geom_hline(yintercept = threshold, linetype = "dashed", color = "red") +
+  geom_text_repel(aes(label = label), na.rm = TRUE, size = 3) +
+  labs(title = "Cook's Distance",
+       x = "Observation",
+       y = "Cook's Distance") +
+  theme_minimal()
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+# residuals
+resid <- fit.42$residuals
+
+# Fitted values
+fitted_vals <- fitted(fit.42)
+
+# Residuals vs Fitted
+b <- ggplot(data = NULL, aes(x = fitted_vals, y = resid)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(se = FALSE, color = "blue", method = "loess") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "Residuals vs. Fitted",
+       x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+
+# Scale Location
+c <- ggplot(data = NULL, aes(x = fitted_vals, y = sqrt(abs(resid)))) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(se = FALSE, color = "red", method = "loess") +
+  labs(title = "Scale-Location Plot",
+       x = "Fitted Values",
+       y = "sqrt(|Standardized Residuals|)") +
+  theme_minimal()
+
+# Normal QQ Plot
+qqnorm(resid)
+qqline(resid, col = "red")
+ 
+# Residuals vs Observation
+d <- ggplot(data = NULL, aes(x = 1:length(resid(fit.42)), y = resid(fit.42))) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "Residuals vs. Observation",
+       x = "Observation",
+       y = "Residuals") +
+  theme_minimal()
+
+(a/b)
+(c/d)
+```
+
+## Model Validation
+
+```{r, echo=FALSE}
+library(knitr)
+set.seed(12345)  
+n_total <- nrow(filtered.transformed)  
+cv.samp <- sample(1:n_total, 368, replace = FALSE)  # 70% for training  
+cv.in <- filtered.transformed[cv.samp, ]              # "In" sample  
+cv.out <- filtered.transformed[-cv.samp, ]            # "Out" sample  
+
+#anova(fit.42)
+
+# Predict for "out" sample  
+pred.cv.out <- predict(fit.42, newdata = cv.out)  
+
+# Calculate prediction errors (delta)  
+delta.cv.out <- cv.out$price - pred.cv.out  
+
+# Compute MSPE (Mean Squared Prediction Error)  
+n.star <- nrow(cv.out)  
+MSPE <- sum((delta.cv.out)^2) / n.star  
+
+# Print MSPE (as in the image)  
+MSPE
+
+
+# Create the first table (raw MSE/MSPE)
+table1 <- data.frame(
+  Metric = "Validation Statistics",
+  MSPE = 1815866,
+  MSE = 1376649
+)
+
+# Create the second table (square roots)
+table2 <- data.frame(
+  Metric = "Validation Statistics",
+  sqrt_MSPE = round(sqrt(1815866)),
+  sqrt_MSE = round(sqrt(1376649))
+)
+
+# Display tables using simple kable
+kable(table1, 
+      col.names = c("", "MSPE", "MSE"),
+      align = c("l", "r", "r"))
+
+kable(table2, 
+      col.names = c("", "sqrt(MSPE)", "sqrt(MSE)"),
+      align = c("l", "r", "r"))
+```
+
+The validation results for the Power Model shows that it achieves a Mean Squared Prediction Error (MSPE) of 1,815,866 and a Mean Squared Error (MSE) of 1,376,649 on the validation and training data, respectively. When converted to the root scale, these translate to average prediction errors of ± 1,348 MSPE and ± 1,173 MSE for the training data. This indicates the model has moderate overfitting, performing slightly worse on unseen data, but still maintains reasonable predictive accuracy within a ~6.5% error margin for an average-priced car. The results suggest the model generalizes decently but could benefit from further refinement to reduce the gap between training and validation performance.
+
+Residuals vs Fitted:
+We get a trumpet shaped pattern with most points spreading out further to the 
+right. This suggests heteroscedasticity, which means that our assumption that
+we have equal variance may have be violated.
+
+Normal Q-Q Plot:
+We can see on the plot that most of the points - with the exception of a few 
+points near the ends - fall on the line, which suggests that the normality 
+assumption has not been violated. 
+
+Scale-Location Plot: 
+The plot shows that the red line is not exactly linear. There is a small hill 
+near the right, going up then down. The points are also spread out more to the 
+right This suggests that the homoscedasticity assumption may not hold, and 
+variance may not be constant.
+
+Residuals vs. Observation Plot: 
+The points are completely scattered with no obvious pattern. It doesn't indicate
+that any assumptions were violated. 
+
+# Discussion and Conclusion
+The goal of our study was to predict the price of a car based on different car features, using regression techniques. After looking through possible predictors, testing different interaction terms and polynomial transformations, we developed our final model, which includes predictors such as views, favorite, car mileage, engine capacity, horsepower. Qualitative factors such as A/C, car type, and fuel, were included as well. Polynomial terms up to the second and third order, as well as interaction terms like mileage-age and fuel-efficienct were also included after discovering they improved model performance. Part of our analysis focused on filtering the data based on qualitative variables and ensuring that we worked with a cleaner subset of the data free from outliers. After transforming, centering, and filtering the data, we observed improvement in the correlations between variables. The correlation plots demonstrated better relationships between features, and the residual plots, histograms, and Q-Q plots showed better normalization and fewer outliers. The use of filtering and transformations notably improved the quality of the analysis, resulting in more reliable models. Our final model appears to satisfy the assumption of normality, but there are clear violations of homoscedasticity as seen through the residual plots. Given these violations, remedial measures such as  Weighted Least Squares should be applied. In conclusion, the analysis has provided valuable insights into the factors that drive car prices, and the models developed can serve to make future predictions.
+
+## References
+
+Kutner, M. H., Nachtsheim, C. J., & Neter, J. (2004). Applied Linear Regression Models: Michael H. Kutner, Christopher J. Nachtsheim, John Neter. McGraw-Hill. 
+
+\newpage 
+
+# Appendix
+
+```{r, echo=FALSE}
+quan_vars <- c("views", "favorite", "num.days",
+               "car_mileage, km", "engine_capacity, cc", 
+               "year_to_date", "hp")
+for (var.quant in quan_vars) {
+  
+  temp <- serbia_car_sales_price_2024[[var.quant]]
+  tests.function(temp, serbia_car_sales_price_2024$price, quan_vars, var.quant)
+  temp.x <- filtered.transformed[[var.quant]]
+  tests.function(temp.x, filtered.transformed$price, quan_vars, var.quant)
+}
+```
+
